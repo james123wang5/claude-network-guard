@@ -19,6 +19,16 @@ ditto "build/Claude Network Guard.app" "$target"
 echo "接下来安装隔离组件，请输入这台 Mac 的登录密码："
 sudo bash "$target/Contents/Resources/install-component.sh" "$target/Contents/MacOS" "$(id -u)"
 # 旧名字的版本用同一份设置，装好新版后移除。
-if [ -d "$old" ]; then rm -rf "$old"; echo "已移除旧版 App Network Guard，设置保留。"; fi
+# 系统按标识找图标和通知，同标识的副本只能留一份，否则通知会显示旧图标。
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+for copy in "$old" "$PWD/build/Claude Network Guard.app" "$PWD/build/App Network Guard.app"; do
+  "$lsregister" -u "$copy" >/dev/null 2>&1 || true
+done
+rm -rf "build/Claude Network Guard.app"
+"$lsregister" -f "$target" || true
+if [ -d "$old" ]; then
+  rm -rf "$old"; echo "已移除旧版 App Network Guard，设置保留。"
+  killall NotificationCenter 2>/dev/null || true  # 系统会自动重开，让通知换上新图标
+fi
 open "$target"
 echo "安装完成。"
