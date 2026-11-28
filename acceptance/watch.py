@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """旁观一场真实的 USB 会话（例如日常使用的 Claude Desktop），出具泄漏报告。
-在系统自带「终端」里运行（不要在被测应用里运行）：  python3 acceptance/watch.py [分钟数，默认 5]
-会要求输入一次 sudo 密码用于抓包。运行期间请在被测应用里尽量多用各种功能。"""
+在系统自带「终端」里运行（不要在被测应用里运行）：
+  python3 acceptance/watch.py [分钟数，默认 5]            稳定运行：全程不应断网
+  python3 acceptance/watch.py [分钟数] --unplug           拔线恢复：中途拔线再点「检查并恢复」
+会要求输入一次 sudo 密码用于抓包。运行期间请在被测应用里尽量多用各种功能。
+结论“没有发现泄漏”时退出码为 0，否则为 1。"""
 import ipaddress, os, re, subprocess, sys, tempfile, time
 from collections import defaultdict
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from netd import call
 
-minutes = float(sys.argv[1]) if len(sys.argv) > 1 else 5
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+unplug = "--unplug" in sys.argv[1:]
+minutes = float(args[0]) if args else 5
 def sh(*a): return subprocess.run(a, capture_output=True, text=True).stdout
 start = call(command="status")
 if start["state"] != "armed" or start.get("mode") != "usb": sys.exit("当前没有生效中的 USB 会话，请先从 App 启动目标应用")
@@ -27,6 +32,8 @@ dump = subprocess.Popen(["sudo", "-n", "/bin/sh", "-c", CAPTURE, "sh", "/usr/sbi
 time.sleep(2)
 if dump.poll() is not None: sys.exit("抓包没有启动，请重新运行")
 print(f"正在监视 {minutes} 分钟。请依次使用：聊天、上传文件、内置浏览器、MCP 工具、Claude Code 命令、联网搜索、设置页 …", flush=True)
+if unplug: print("拔线恢复模式：中途拔线 10 秒再插回，点「检查并恢复」，结束前要恢复成功。", flush=True)
+strict = bool(start.get("strictDNS"))
 ports, relay, udp, names, states = {}, 0, set(), set(), set()
 known = {e["id"] for e in start["events"]}
 end = time.time() + minutes * 60
@@ -78,5 +85,21 @@ print(f"默认线路上的 DNS 查询（严格 DNS 打开时应为空）：{dns[
 print(f"服务拦截：{'已验证生效' if shield.get('verified') else '没有生效'}，覆盖 {len(nets)} 段地址，已拦 {shield.get('blockedPackets', 0)} 个包，来自 {shield.get('programs') or '（没有）'}，拦不到 {shield.get('uncovered') or '（没有）'}")
 print(f"默认线路上与该服务往来的包（不分软件，应为空）：{dict(outside) or '无'}")
 for e in events: print(f"事件 {e['kind']}: {e['detail']}")
-ok = shield.get("verified") and nets and not outside and relay and lines and not leaks and not udp and states == {"armed"}
-print("结论：" + ("没有发现泄漏" if ok else "存在需要查看的项目，见上"))
+problems = []
+if not shield.get("verified") or not nets: problems.append("服务拦截没有验证生效")
+if outside: problems.append("默认线路上出现了与该服务往来的包")
+if not relay or not lines: problems.append("正向对照为 0，抓包或观察可能没生效")
+if leaks: problems.append("默认线路上有受保护进程的包")
+if udp: problems.append("受保护进程有 UDP 外连")
+kinds = [e["kind"] for e in events]
+if unplug:
+    # 拔线期间严格 DNS 会临时还原给其他应用用，所以这一模式不按 DNS 判；要求断过网、恢复前暂停过 Claude、最后恢复成功。
+    if "blocked" not in kinds: problems.append("没有观察到断网（没有拔线？）")
+    if "hold" not in kinds: problems.append("恢复时没有暂停受保护进程")
+    recovered = "blocked" in kinds and "armed" in kinds[kinds.index("blocked"):]
+    if final["state"] != "armed" or ("blocked" in kinds and not recovered): problems.append("结束时没有恢复成功")
+else:
+    if states != {"armed"}: problems.append(f"会话状态不是全程 armed：{sorted(states)}（要测拔线请加 --unplug）")
+    if strict and dns: problems.append("严格 DNS 打开时默认线路上出现了 DNS 查询")
+print("结论：" + ("没有发现泄漏" if not problems else "存在需要查看的项目：" + "；".join(problems)))
+sys.exit(0 if not problems else 1)

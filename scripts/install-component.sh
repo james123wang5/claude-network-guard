@@ -16,28 +16,37 @@ gid="$(dscl . -read /Groups/appnetguard PrimaryGroupID 2>/dev/null | awk '{print
 if [ -n "$gid" ] && ps -ax -o gid= | awk -v g="$gid" '$1==g{found=1} END{exit !found}'; then
   echo "Claude 仍在保护中运行，请先退出它再安装"; exit 75
 fi
-launchctl bootout "system/$label" 2>/dev/null || true
-rm -f /var/run/appnetworkguard/control.sock
 if [ -z "$gid" ]; then
   dseditgroup -o create -r "Claude Network Guard" appnetguard
   gid="$(dscl . -read /Groups/appnetguard PrimaryGroupID | awk '{print $2}')"
 fi
 [ "$gid" -ge 100 ] || { echo "隔离组编号异常"; exit 70; }
 
-install -d -o root -g wheel -m 755 "$target" "$state"
-for name in guardnetd guardrelay guardcheck; do install -o root -g wheel -m 755 "$source_dir/$name" "$target/$name"; done
-install -o root -g appnetguard -m 2755 "$source_dir/guardrun" "$target/guardrun"
+# 先把新版完整准备在旁边的目录里。这一步失败时旧组件完全没被动过，照常运行。
+stage="$target.new"; previous="$target.old"
+rm -rf "$stage"
+trap 'rm -rf "$stage"' EXIT
+install -d -o root -g wheel -m 755 "$stage" "$stage/shell" "$state"
+for name in guardnetd guardrelay guardcheck; do install -o root -g wheel -m 755 "$source_dir/$name" "$stage/$name"; done
+install -o root -g appnetguard -m 2755 "$source_dir/guardrun" "$stage/guardrun"
 for name in guardnetd guardrelay guardcheck guardrun; do
-  xattr -c "$target/$name"
-  codesign --force --sign - --identifier "local.appnetworkguard.$name" "$target/$name"
+  xattr -c "$stage/$name"
+  codesign --force --sign - --identifier "local.appnetworkguard.$name" "$stage/$name"
 done
-chown root:appnetguard "$target/guardrun"; chmod 2755 "$target/guardrun"
-install -d -o root -g wheel -m 755 "$target/shell"
+chown root:appnetguard "$stage/guardrun"; chmod 2755 "$stage/guardrun"
 for name in zsh bash; do
-  install -o root -g wheel -m 755 "$source_dir/guardshell" "$target/shell/$name"
-  xattr -c "$target/shell/$name"
-  codesign --force --sign - --identifier "local.appnetworkguard.guardshell" "$target/shell/$name"
+  install -o root -g wheel -m 755 "$source_dir/guardshell" "$stage/shell/$name"
+  xattr -c "$stage/shell/$name"
+  codesign --force --sign - --identifier "local.appnetworkguard.guardshell" "$stage/shell/$name"
 done
+
+# 准备好了才切换：停旧服务，整个目录换成新版，旧版留作回滚。
+launchctl bootout "system/$label" 2>/dev/null || true
+rm -f /var/run/appnetworkguard/control.sock
+rm -rf "$previous"
+if [ -d "$target" ]; then mv "$target" "$previous"; fi
+mv "$stage" "$target"
+trap - EXIT
 printf '%s\n' "$owner" > "$state/owner"; chown root:wheel "$state/owner"; chmod 644 "$state/owner"
 
 cat > "$plist" <<PLIST
@@ -54,10 +63,27 @@ cat > "$plist" <<PLIST
 </dict></plist>
 PLIST
 chown root:wheel "$plist"; chmod 644 "$plist"
-for attempt in 1 2 3 4 5 6 7 8; do
-  launchctl bootstrap system "$plist" 2>/dev/null && break
-  [ "$attempt" = 8 ] && { echo "守护进程未能启动"; exit 71; }
-  sleep 0.5
-done
-for attempt in $(seq 1 20); do printf '{"command":"status"}\n' | nc -U -w 1 /var/run/appnetworkguard/control.sock 2>/dev/null | grep -q '"state"' && { echo "隔离组件已安装（组 ${gid}）"; exit 0; }; sleep 0.25; done
-echo "守护进程没有响应，请查看 /var/log/appnetworkguard.log"; exit 71
+start_daemon() {
+  for attempt in 1 2 3 4 5 6 7 8; do
+    launchctl bootstrap system "$plist" 2>/dev/null && break
+    [ "$attempt" = 8 ] && return 1
+    sleep 0.5
+  done
+  for attempt in $(seq 1 20); do
+    printf '{"command":"status"}\n' | nc -U -w 1 /var/run/appnetworkguard/control.sock 2>/dev/null | grep -q '"state"' && return 0
+    sleep 0.25
+  done
+  return 1
+}
+if start_daemon; then
+  rm -rf "$previous"
+  echo "隔离组件已安装（组 ${gid}）"; exit 0
+fi
+# 新版起不来：换回旧版并重新启动它。
+launchctl bootout "system/$label" 2>/dev/null || true
+rm -f /var/run/appnetworkguard/control.sock
+if [ -d "$previous" ]; then
+  rm -rf "$target"; mv "$previous" "$target"
+  if start_daemon; then echo "新版组件没能启动，已恢复旧版组件。详情见 /var/log/appnetworkguard.log"; exit 72; fi
+fi
+echo "守护进程没有响应，请查看 /var/log/appnetworkguard.log，然后重新运行安装"; exit 71

@@ -18,6 +18,7 @@ struct HomeView: View {
             let now = timeline.date
             let stage = self.stage(now)
             VStack(alignment: .leading, spacing: 20) {
+                if session.orphaned { orphan } else {
                 switch stage {
                 case .running: running(now)
                 case .cut: cut(now)
@@ -26,8 +27,20 @@ struct HomeView: View {
                 }
                 default: idle(stage, now)
                 }
+                }
             }
             .animation(.easeOut(duration: 0.2), value: stage)
+        }
+    }
+
+    /// 界面重开后发现后台还有一场会话。
+    @ViewBuilder private var orphan: some View {
+        let blocked = isolation.status?.state == .blocked
+        StatusCard(tone: blocked ? .failed : .warning, icon: blocked ? "shield.slash.fill" : "shield.lefthalf.filled",
+                   title: blocked ? "后台还有一场保护，Claude 已断网" : "后台还有一场保护在进行",
+                   detail: "Guard 界面重开过，接不回原来的会话。Claude 仍被锁在原来的线路上，线路出问题时保持断网，不会换线。想继续用，先结束这场保护，再从 Guard 重新启动。",
+                   busy: session.releasing) {
+            Button("结束保护并退出 Claude", action: session.stopOrphan).primaryButton(inverted: true).disabled(session.releasing)
         }
     }
 
@@ -282,8 +295,8 @@ enum Stage: Equatable {
         case .missing, .untrusted: return .download
         case .searching, .ready: break
         }
-        // 组件不配套就不能启动；USB 连检测网站都要靠它。
-        if f.installed ? !f.current : f.mode == .usb { return .component }
+        // 组件没装、版本不配套或暂时没响应，三种保护都不能启动：没有内核锁线就不算保护。
+        if !f.installed || !f.current { return .component }
         if !f.checked { return .check }
         if f.approved { return f.claudeRunning ? .quitClaude : .launch }
         // 从 USB 打开检测网站时 Claude 必须已经退出。

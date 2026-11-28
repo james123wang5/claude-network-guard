@@ -179,6 +179,9 @@ final class Daemon {
     private var timer: DispatchSourceTimer?
     private var listener: DispatchSourceRead?
     private var tickCount = 0
+    /// 恢复检查期间被暂停的受保护进程。检查全部通过才继续；转入断网、会话结束或超时也会继续（此时仍断网）。
+    private var heldPIDs: Set<Int32> = []
+    private var heldAt: Date?
     private var reported: Set<String> = []
     private let strictDNS = StrictDNS()
     private var rulesGuardDNS = false
@@ -295,7 +298,32 @@ final class Daemon {
             try release()
         case .release: try release()
         case .permit: try permit(request)
+        case .resume: resumeHeld()
         }
+    }
+
+    /// 暂停受保护组里所有进程。多扫几遍，接住暂停过程中刚派生出来的子进程。
+    private func holdMembers() {
+        for _ in 0..<5 {
+            let fresh = ProcessAudit.members(of: gid, in: ProcessAudit.processes()).map(\.pid).filter { $0 > 1 && !heldPIDs.contains($0) }
+            if fresh.isEmpty { break }
+            for pid in fresh { Darwin.kill(pid, SIGSTOP) }
+            heldPIDs.formUnion(fresh)
+        }
+        guard !heldPIDs.isEmpty else { return }
+        if heldAt == nil {
+            heldAt = Date()
+            record("hold", "恢复检查期间暂停了 \(heldPIDs.count) 个受保护进程，检查通过才继续")
+        }
+        status.held = true
+    }
+
+    private func resumeHeld() {
+        guard !heldPIDs.isEmpty || heldAt != nil else { return }
+        for pid in heldPIDs { Darwin.kill(pid, SIGCONT) }
+        heldPIDs = []
+        heldAt = nil
+        status.held = nil
     }
 
     /// 受保护应用断网期间，用户要在新线路上看检测网站：只放开保护外软件从这块网卡连服务，受保护组照样断网。
@@ -340,8 +368,13 @@ final class Daemon {
         if mode == .usb {
             guard let usb = USBLine.read(interface) else { throw Refusal("not_iphone_usb") }
             guard let path = defaultInterface(), path != interface else { throw Refusal("no_separate_path") }
-            let previous = status.relayPort ?? 0
-            guard let relay = Relay(usb, port: previous) ?? Relay(usb, port: 0) else { throw Refusal("relay_failed") }
+            // 运行中的 Claude 指向启动时的端口（守护进程重启后由界面告知）。有成员时只能沿用它，不能悄悄换端口。
+            let previous = request.relayPort ?? status.relayPort ?? 0
+            let running = !ProcessAudit.members(of: gid, in: ProcessAudit.processes()).isEmpty
+            if running && previous == 0 { throw Refusal("relay_port_unknown") }
+            guard let relay = Relay(usb, port: previous) ?? (running ? nil : Relay(usb, port: 0)) else {
+                throw Refusal(running ? "relay_port_busy" : "relay_failed")
+            }
             self.relay = relay
             line = usb
             counted = (0, 0)
@@ -364,6 +397,8 @@ final class Daemon {
         session = next
         status.mode = mode
         status.interface = interface
+        // 恢复时先暂停已在运行的应用：放行规则生效后、界面完成自检和 IP 复核之前，它不能发出任何请求。
+        if request.hold == true { holdMembers() }
         do {
             // 先拦保护外的程序，再放行受保护应用。
             try loadShield(armed: true)
@@ -475,9 +510,12 @@ final class Daemon {
             status.reason = reason
             record("blocked", reason)
         }
+        // 已经断网，暂停的进程可以继续运行（连不出去）。
+        resumeHeld()
     }
 
     private func clear() {
+        resumeHeld()
         permitted = nil
         relay?.stop()
         relay = nil
@@ -729,6 +767,8 @@ final class Daemon {
     private func tick() {
         guard let session else { return }
         tickCount += 1
+        // 界面迟迟没有完成恢复检查（例如界面崩溃）：转入断网，让暂停的进程继续，不放行。
+        if let heldAt, Date().timeIntervalSince(heldAt) > 90 { enterBlocked("hold_timeout") }
         checkPermit()
         if status.state == .armed { checkLine(session) }
         if status.state == .armed, session.mode == .usb, relay?.alive != true { enterBlocked("relay_exited") }
@@ -829,9 +869,14 @@ final class Daemon {
 
     private func updateSocketBlocks(_ wanted: Set<InternetSocket>) {
         guard wanted != blockedSockets else { return }
+        let result = wanted.isEmpty ? run("/sbin/pfctl", ["-q", "-a", PFRules.socketAnchor, "-F", "rules"])
+            : run("/sbin/pfctl", ["-q", "-a", PFRules.socketAnchor, "-f", "-"], input: PFRules.socketRules(wanted))
+        // 只有写入成功才记为已封锁；失败时保留旧记录，下一轮会重试。
+        guard result.status == 0 else {
+            once("socket-rules-failed", kind: "warning", detail: "逐连接封锁没能写入防火墙，会继续重试（整组的 UDP 拒绝不受影响）")
+            return
+        }
         blockedSockets = wanted
-        if wanted.isEmpty { _ = run("/sbin/pfctl", ["-q", "-a", PFRules.socketAnchor, "-F", "rules"]) }
-        else { _ = run("/sbin/pfctl", ["-q", "-a", PFRules.socketAnchor, "-f", "-"], input: PFRules.socketRules(wanted)) }
     }
 
     private func meter() {

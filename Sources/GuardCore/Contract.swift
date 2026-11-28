@@ -3,7 +3,7 @@ import Foundation
 
 /// 隔离组件与界面之间的约定。界面不参与执行：界面退出或崩溃后，守护进程和内核规则继续生效。
 public enum GuardContract {
-    public static let version = "0.9.0"
+    public static let version = "0.9.1"
     public static let group = "appnetguard"
     public static let directory = "/Library/PrivilegedHelperTools/AppNetworkGuard"
     public static let runner = directory + "/guardrun"
@@ -21,7 +21,8 @@ public enum IsolationState: String, Codable, Sendable { case idle, armed, blocke
 
 public struct ControlRequest: Codable, Sendable {
     public enum Command: String, Codable, Sendable { /// permit：断网期间让用户在新线路上看检测网站，受保护应用仍然断网。
-        case status, arm, block, release, terminate, permit }
+        /// resume：恢复时被暂停的受保护进程，在全部检查通过后继续运行。
+        case status, arm, block, release, terminate, permit, resume }
     public var command: Command
     public var mode: IsolationMode?
     public var interface: String?
@@ -33,8 +34,14 @@ public struct ControlRequest: Codable, Sendable {
     public var expectedExit: String?
     /// 用户放行的内网“地址:端口”。
     public var allowed: [String]?
+    /// arm 时先暂停已在运行的受保护进程，直到 resume；检查失败转入断网时也会让它们继续（仍然断网）。
+    public var hold: Bool?
+    /// USB 恢复时，运行中的 Claude 启动时用的转发端口。必须沿用它，换端口 Claude 就接不回来。
+    public var relayPort: UInt16?
 
-    public init(_ command: Command, mode: IsolationMode? = nil, interface: String? = nil, domains: [String]? = nil, strictDNS: Bool? = nil, confined: Bool? = nil, expectedExit: String? = nil, allowed: [String]? = nil) {
+    public init(_ command: Command, mode: IsolationMode? = nil, interface: String? = nil, domains: [String]? = nil, strictDNS: Bool? = nil, confined: Bool? = nil, expectedExit: String? = nil, allowed: [String]? = nil, hold: Bool? = nil, relayPort: UInt16? = nil) {
+        self.hold = hold
+        self.relayPort = relayPort
         self.allowed = allowed
         self.expectedExit = expectedExit
         self.strictDNS = strictDNS
@@ -128,6 +135,8 @@ public struct ControlStatus: Codable, Sendable, Equatable {
     public var offloadDisabled = false
     /// 当前真正放行着的内网地址（VPN 没开时为空）。
     public var allowed: [String]?
+    /// 受保护进程正被暂停，等待恢复检查结束。
+    public var held: Bool?
     public var error: String?
 
     public init() {}

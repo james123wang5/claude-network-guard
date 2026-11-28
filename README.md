@@ -7,7 +7,7 @@
 **出门在外，让 Claude 只走你认可的那条网络。**
 
 手机漫游、数据线、热点、VPN，你选一条、亲眼看过 IP、点认可。
-线路一断或 IP 一变，Claude 立刻断网，绝不偷偷换到别的网络。
+线路一断，Claude 立刻断网；出口 IP 一变，几秒内断网。绝不偷偷换到别的网络。
 
 ![Tested on macOS 27](https://img.shields.io/badge/%E5%AE%9E%E6%B5%8B-macOS_27-black) ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-only-555) ![iPhone](https://img.shields.io/badge/iPhone-USB%20%2F%20Hotspot-0A84FF) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/version-0.9.0-4F46E5)
 

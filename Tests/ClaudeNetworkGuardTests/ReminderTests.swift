@@ -94,7 +94,12 @@ final class ReminderTests: XCTestCase {
         f.current = false
         XCTAssertEqual(Stage.of(f), .component)
         f.mode = .vpn
-        XCTAssertEqual(Stage.of(f), .check, "VPN 和热点没装组件也能用")
+        XCTAssertEqual(Stage.of(f), .component, "VPN 和热点没有可用组件也不能启动，不降级成只监测")
+        f.mode = .hotspot
+        XCTAssertEqual(Stage.of(f), .component)
+        f.mode = .current
+        XCTAssertNotEqual(Stage.of(f), .component, "只检查不需要组件")
+        f.mode = .vpn
         f.installed = true
         XCTAssertEqual(Stage.of(f), .component, "装了但不配套就不能启动")
         f.mode = .current

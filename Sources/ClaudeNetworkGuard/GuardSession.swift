@@ -90,6 +90,8 @@ final class GuardSession: ObservableObject {
     /// 正在 USB 里临时打开检测网站，还没有启动 Claude。
     @Published private(set) var siteTesting = false
     @Published private(set) var releasing = false
+    /// USB 会话里 Claude 启动时用的转发端口，恢复时要沿用。
+    var usbRelayPort: UInt16?
     private var pinContext: (baseline: NativeNetworkMonitor.Baseline, evidence: NativeProtectionPolicy.Evidence)?
     /// Guard 自己不去连 Claude：IP 没认可或刚变了的时候，一次探测就会把它交给对方。
     private var diagnostics: NativeDiagnostics { NativeDiagnostics(hosts: [], skippedHosts: ClaudeApp.hosts) }
@@ -300,7 +302,6 @@ final class GuardSession: ObservableObject {
             return
         }
         let bundleID = selection.identity.bundleID
-        let appURL = selection.url
         guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty else {
             setState("Claude 已在运行", "请先按 ⌘Q 退出 Claude，再从 Guard 启动。")
             return
@@ -374,20 +375,20 @@ final class GuardSession: ObservableObject {
                 }
 
                 let requestedAt = Date()
-                let app: NSRunningApplication
-                if isolation.ready {
-                    kernelLocked = true
-                    try await lockPin(selection, interface: evidence.interface, address: report.exits[.v4]?.address)
-                    guard !stopping else {
-                        finishNative("启动已取消", "没有打开 Claude。")
-                        return
-                    }
-                    app = try await Self.launchIsolated(selection, port: nil)
-                } else {
-                    let configuration = NSWorkspace.OpenConfiguration()
-                    configuration.createsNewApplicationInstance = false
-                    app = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+                // 组件不可用（没装、版本不配套或暂时没响应）时不降级成只监测：拒绝启动。
+                await isolation.refresh()
+                guard isolation.ready else {
+                    finishNative("隔离组件不可用", "没有打开 Claude。保护需要后台组件正常运行，请在「设置」里安装或更新组件后再试。")
+                    return
                 }
+                kernelLocked = true
+                try await lockPin(selection, interface: evidence.interface, address: report.exits[.v4]?.address)
+                guard !stopping else {
+                    _ = try? await IsolationModel.command(.init(.block))
+                    finishNative("启动已取消", "没有打开 Claude。")
+                    return
+                }
+                let app = try await Self.launchIsolated(selection, port: nil)
                 guard let process = AppProcessExitCheck.Identity.read(app.processIdentifier),
                       app.bundleIdentifier == bundleID,
                       app.executableURL?.resolvingSymlinksInPath().path == selection.identity.executable,
@@ -681,7 +682,7 @@ final class GuardSession: ObservableObject {
         guard let address, isApproved(protectionMode, address) else { throw PinFailure(reason: "这个 IP 还没认可。") }
         guard let allowed = isolation.allowed else { throw PinFailure(reason: "允许的内网地址写得不对，请在「设置」里修改。") }
         _ = try await IsolationModel.command(.init(.arm, mode: .pin, interface: interface, domains: selection.serviceHosts,
-                                                   confined: selection.canConfine, expectedExit: address, allowed: allowed.map(\.text)))
+                                                   confined: selection.canConfine, expectedExit: address, allowed: allowed.map(\.text), hold: true))
         guard await LineExit.read(interface: interface)?.address == address else {
             _ = try? await IsolationModel.command(.init(.block))
             throw PinFailure(reason: "锁线后读到的公网 IP 和认可的不一样。")
@@ -694,6 +695,11 @@ final class GuardSession: ObservableObject {
         guard isolation.status?.state == .armed, selection.serviceHosts.isEmpty || isolation.status?.shield?.verified == true else {
             _ = try? await IsolationModel.command(.init(.block))
             throw PinFailure(reason: "没能确认拦截已经生效。")
+        }
+        // 全部检查通过：恢复时被暂停的 Claude 现在才继续运行。
+        do { _ = try await IsolationModel.command(.init(.resume)) } catch {
+            _ = try? await IsolationModel.command(.init(.block))
+            throw PinFailure(reason: "没能让 Claude 继续运行，已保持断网。")
         }
     }
 
@@ -832,9 +838,16 @@ final class GuardSession: ObservableObject {
             // 没清理完之前不允许再启动，否则新会话会被这次清理一起撤销。
             releasing = true
             Task {
-                _ = try? await IsolationModel.command(.init(.terminate))
+                var problem: String?
+                do { _ = try await IsolationModel.command(.init(.terminate)) } catch { problem = Self.describe(error).trimmingCharacters(in: CharacterSet(charactersIn: "。")) }
                 await isolation.refresh()
+                if problem == nil, let state = isolation.status?.state, state != .idle { problem = "规则仍然存在" }
                 releasing = false
+                // 清理没完成要如实告诉用户，不能显示成已恢复普通模式。
+                if let problem {
+                    setState("保护规则没有撤销干净", "\(problem)。Claude 可能仍处于断网状态。请再点一次停止，或在「设置」里更新组件；仍不行就重启电脑。", includeDetailInLog: true)
+                    GuardNotifications.shared.report(title: "保护规则没有撤销干净", detail: problem)
+                }
             }
         }
         kernelLocked = false
@@ -902,6 +915,27 @@ final class GuardSession: ObservableObject {
         // 保护由守护进程和内核执行，界面退出不影响它，因此 USB 会话不使用心跳守护。
         monitoredApp = app
         Task { await refreshConnections(run) }
+    }
+
+    /// Guard 界面重开过，后台还留着上一场会话（Claude 仍被锁住）：界面接不回它，只能如实显示并让用户结束。
+    var orphaned: Bool { !active && !releasing && (isolation.status.map { $0.state != .idle } ?? false) }
+
+    func stopOrphan() {
+        guard orphaned else { return }
+        releasing = true
+        setState("正在结束后台保护", "正在退出受保护的 Claude 并撤销规则。")
+        Task {
+            var problem: String?
+            do { _ = try await IsolationModel.command(.init(.terminate)) } catch { problem = Self.describe(error).trimmingCharacters(in: CharacterSet(charactersIn: "。")) }
+            await isolation.refresh()
+            if problem == nil, let state = isolation.status?.state, state != .idle { problem = "规则仍然存在" }
+            releasing = false
+            if let problem {
+                setState("保护规则没有撤销干净", "\(problem)。请再试一次，或在「设置」里更新组件；仍不行就重启电脑。", includeDetailInLog: true)
+            } else {
+                setState("已结束后台保护", "已退出受保护的 Claude，恢复普通模式。")
+            }
+        }
     }
 
     func lockUSB() { lineCut = true }

@@ -22,9 +22,15 @@ extension GuardSession {
             do {
                 _ = try await Task.detached(priority: .userInitiated) { try selection.checked() }.value
                 let port = try await establish(selection)
+                usbRelayPort = port
                 guard usbRun(run), !stopping else { throw USBFailure(title: "启动已取消", detail: "没有打开 Claude。") }
                 let app = try await Self.launchIsolated(selection, port: port, locked: isolation.lockdown)
                 adopt(app, run: run)
+                // 打开 Claude 的这段时间里用户点了取消：按停止会话处理，结束它并撤销规则。
+                guard usbRun(run), !stopping else {
+                    await stopNative(run, title: "启动已取消", detail: "已退出刚打开的 Claude，恢复普通模式。")
+                    return
+                }
                 setState("USB 专线会话进行中", "\(selection.displayName) 只经 \(isolation.status?.interface ?? "USB") 联网，其他应用使用原来的网络。")
                 await watchUSB(run)
             } catch {
@@ -70,8 +76,12 @@ extension GuardSession {
                 : "请在「首页」检查线路，去网站看过后点“认可这个 IP”。")
         }
         let status = try await IsolationModel.command(.init(.arm, mode: .usb, interface: line.interface,
-                                                            domains: selection.serviceHosts, strictDNS: isolation.strictDNS && !isolation.lockdown, confined: selection.canConfine, expectedExit: usb.address, allowed: requireApproval ? allowed.map(\.text) : []))
-        guard let port = status.relayPort else { throw USBFailure(title: "USB 转发器未就绪", detail: "请重试。") }
+                                                            domains: selection.serviceHosts, strictDNS: isolation.strictDNS && !isolation.lockdown, confined: selection.canConfine, expectedExit: usb.address, allowed: requireApproval ? allowed.map(\.text) : [], hold: true,
+                                                            relayPort: lineCut || recovering ? usbRelayPort : nil))
+        guard let port = status.relayPort else {
+            _ = try? await IsolationModel.command(.init(.block))
+            throw USBFailure(title: "USB 转发器未就绪", detail: "请重试。")
+        }
         setState("正在做隔离自检", "以受保护身份主动尝试其他线路，全部失败才会启动 Claude。")
         // 规则刚生效或刚恢复时网络可能短暂抖动，最多重试一次。
         var evidence = await IsolationModel.prove(usb: line.interface, other: path, port: port, confined: selection.canConfine, locked: isolation.lockdown)
@@ -96,6 +106,11 @@ extension GuardSession {
         guard selection.serviceHosts.isEmpty || isolation.status?.shield?.verified == true else {
             _ = try? await IsolationModel.command(.init(.block))
             throw USBFailure(title: "服务拦截未生效", detail: "无法确认保护外的软件连不上 Claude，没有启动 Claude。")
+        }
+        // 全部检查通过：恢复时被暂停的 Claude 现在才继续运行。
+        do { _ = try await IsolationModel.command(.init(.resume)) } catch {
+            _ = try? await IsolationModel.command(.init(.block))
+            throw USBFailure(title: "没能让 Claude 继续运行", detail: "已保持断网。请重试。")
         }
         return port
     }
@@ -209,7 +224,7 @@ extension GuardSession {
         }
     }
 
-    private static func describe(_ error: Error) -> String {
+    static func describe(_ error: Error) -> String {
         switch error as? ControlClient.Failure {
         case .refused(let code)?: IsolationModel.explain(code) + "。"
         case .unavailable?: "隔离组件没有响应。"

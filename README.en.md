@@ -7,7 +7,7 @@
 **On the road, keep Claude on the one network you approved.**
 
 Phone roaming, USB cable, hotspot or VPN: pick one, look at its IP yourself, approve it.
-If the line drops or the IP changes, Claude goes offline at once. It never quietly switches networks.
+If the line drops, Claude goes offline at once; if the exit IP changes, within seconds. It never quietly switches networks.
 
 ![Tested on macOS 27](https://img.shields.io/badge/tested_on-macOS_27-black) ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-only-555) ![iPhone](https://img.shields.io/badge/iPhone-USB%20%2F%20Hotspot-0A84FF) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/version-0.9.0-4F46E5)
 

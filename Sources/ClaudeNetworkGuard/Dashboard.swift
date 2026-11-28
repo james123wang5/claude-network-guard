@@ -111,6 +111,7 @@ struct Dashboard: View {
     }
 
     private var status: (String, StatusTone) {
+        if session.orphaned { return ("后台保护中", .neutral) }
         if session.lineCut { return ("已断网", .failed) }
         if session.siteTesting { return ("正在看检测网站", .neutral) }
         guard session.active else { return ("未启动保护", .off) }

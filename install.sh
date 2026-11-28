@@ -14,10 +14,24 @@ if ps -ax -o gid= | awk -v g="$(dscl . -read /Groups/appnetguard PrimaryGroupID 
 ./build-app.sh
 target="/Applications/Claude Network Guard.app"
 old="/Applications/App Network Guard.app"
+# 先拿到管理员授权再动「应用程序」：取消授权时什么都不改。
+echo "接下来安装隔离组件，请输入这台 Mac 的登录密码："
+sudo -v || { echo "没有拿到授权，什么都没有改。"; exit 1; }
+backup=""
+if [ -d "$target" ]; then backup="$(mktemp -d)/previous.app"; ditto "$target" "$backup"; fi
 rm -rf "$target"
 ditto "build/Claude Network Guard.app" "$target"
-echo "接下来安装隔离组件，请输入这台 Mac 的登录密码："
-sudo bash "$target/Contents/Resources/install-component.sh" "$target/Contents/MacOS" "$(id -u)"
+if ! sudo bash "$target/Contents/Resources/install-component.sh" "$target/Contents/MacOS" "$(id -u)"; then
+  # 组件脚本失败时会保留或换回旧组件；App 也换回旧版，保持前后台一致。
+  if [ -n "$backup" ]; then
+    rm -rf "$target"; ditto "$backup" "$target"
+    echo "没有装好，已把 Guard 恢复成原来的版本。"
+  else
+    echo "没有装好。打开 Guard 后可在「设置」里重新安装组件。"
+  fi
+  exit 1
+fi
+if [ -n "$backup" ]; then rm -rf "$(dirname "$backup")"; fi
 # 旧名字的版本用同一份设置，装好新版后移除。
 # 系统按标识找图标和通知，同标识的副本只能留一份，否则通知会显示旧图标。
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
