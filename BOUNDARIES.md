@@ -127,6 +127,7 @@ VPN 开了“禁止一切非 VPN 流量”，或者会清空系统防火墙时�
 | iPhone 热点启动、断开、恢复 | 外部浏览器登录的完整流程 |
 | 数据线 + VPN 同时开 | 本机虚拟机里的 Cowork |
 | 浏览器的 Claude 插件被拦（ego 浏览器） | Chrome 里的 Claude 插件 |
+| VPN 保护中模拟代理回落直连：保护外的程序绑 Wi‑Fi 网卡连 claude.ai、api.anthropic.com，都被拦并记录 | 用 Clash、mihomo 真实切到 DIRECT |
 | 允许的内网地址：只放行填的那个端口 | `guard-shell.sh` |
 | 切回普通模式没有残留 | 另一台 Mac、其他 macOS 版本 |
 
