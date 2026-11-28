@@ -213,6 +213,7 @@ final class IsolationModel: ObservableObject {
         case "user_blocked": "已手动断网"
         case "exit_changed": "公网 IP 和你认可的不一样了"
         case "hold_timeout": "恢复检查没有按时完成，已保持断网"
+        case "exit_unverified": "超过 1 分钟没能确认公网 IP，已断网"
         case "relay_port_busy", "relay_port_unknown": "Claude 原来用的转发通道接不回来了，请停止保护后重新启动 Claude"
         case "invalid_allowed": "允许的内网地址写得不对"
         case "shield_load_failed": "无法装载对保护外软件的拦截规则"

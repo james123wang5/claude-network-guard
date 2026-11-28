@@ -198,6 +198,9 @@ final class Daemon {
     private var permitted: Permit?
     private var checkingExit = false
     private var exitFailures = 0
+    /// 从第一次读不到公网 IP 起算；连续读不到超过 exitGrace 就断网（线路虽锁着，但没法确认出口还是认可的那个）。
+    private var exitUnknownSince: Date?
+    private let exitGrace: TimeInterval = 60
     private let sessionFile = GuardContract.stateDirectory + "/session.json"
     private let trafficFile = GuardContract.stateDirectory + "/traffic.json"
     private let eventFile = GuardContract.stateDirectory + "/events.json"
@@ -417,6 +420,7 @@ final class Daemon {
         status.reason = nil
         status.exitCheckedAt = nil
         exitFailures = 0
+        exitUnknownSince = nil
         refreshShieldAddresses()
         reported = []
         record("armed", "\(mode == .usb ? "USB 专线" : "锁定线路") \(interface) 已生效")
@@ -745,10 +749,14 @@ final class Daemon {
                 guard self.status.state == .armed, self.session?.interface == interface, self.session?.expectedExit == expected else { return }
                 guard let address else {
                     self.exitFailures += 1
-                    if self.exitFailures == 3 { self.record("exit", "连续几次没能核对公网 IP，会继续尝试") }
+                    let since = self.exitUnknownSince ?? Date()
+                    self.exitUnknownSince = since
+                    if self.exitFailures == 3 { self.record("exit", "连续几次没能核对公网 IP，1 分钟内还读不到就断网") }
+                    if Date().timeIntervalSince(since) >= self.exitGrace { self.enterBlocked("exit_unverified") }
                     return
                 }
                 self.exitFailures = 0
+                self.exitUnknownSince = nil
                 if address == expected { self.status.exitCheckedAt = Date() } else { self.enterBlocked("exit_changed") }
             }
         }

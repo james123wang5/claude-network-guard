@@ -198,8 +198,11 @@ extension GuardSession {
                 if status.state != .armed, !lineCut, !recovering {
                     let reason = IsolationModel.explain(status.reason ?? "状态异常")
                     lockUSB()
-                    let moved = status.reason == "exit_changed"
-                    setState(moved ? "USB 的公网 IP 变了，Claude 已断网" : "USB 已断开，Claude 已断网", reason + "。Claude 保持打开但无法联网，不会换到 Wi‑Fi 或 VPN。" + (moved ? "确认新 IP 可以接受后" : "重新插好后") + "点「检查并恢复」。")
+                    let moved = status.reason == "exit_changed", unknown = status.reason == "exit_unverified"
+                    let title = moved ? "USB 的公网 IP 变了，Claude 已断网" : unknown ? "读不到 USB 的公网 IP，Claude 已断网"
+                        : ["line_lost", "line_changed", "relay_exited"].contains(status.reason ?? "") ? "USB 已断开，Claude 已断网" : "USB 专线中断，Claude 已断网"
+                    let next = moved ? "确认新 IP 可以接受后" : unknown ? "手机信号恢复后" : "重新插好或排除问题后"
+                    setState(title, reason + "。Claude 保持打开但无法联网，不会换到 Wi‑Fi 或 VPN。" + next + "点「检查并恢复」。")
                     GuardNotifications.shared.report(title: "USB 专线中断", detail: reason + "。Claude 已断网，未切换到其他线路。")
                 }
             } else {

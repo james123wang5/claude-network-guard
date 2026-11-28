@@ -19,6 +19,11 @@ echo "接下来安装隔离组件，请输入这台 Mac 的登录密码："
 sudo -v || { echo "没有拿到授权，什么都没有改。"; exit 1; }
 backup=""
 if [ -d "$target" ]; then backup="$(mktemp -d)/previous.app"; ditto "$target" "$backup"; fi
+# 被 Ctrl-C 或关掉终端打断时，把原来的 App 放回去（组件脚本下次运行会自行修复半途的切换）。
+restore_app() {
+  if [ -n "$backup" ] && [ -d "$backup" ]; then rm -rf "$target"; ditto "$backup" "$target"; echo "安装被中断，已把 Guard 恢复成原来的版本。"; fi
+}
+trap 'restore_app; exit 130' INT TERM HUP
 rm -rf "$target"
 ditto "build/Claude Network Guard.app" "$target"
 if ! sudo bash "$target/Contents/Resources/install-component.sh" "$target/Contents/MacOS" "$(id -u)"; then
@@ -31,6 +36,7 @@ if ! sudo bash "$target/Contents/Resources/install-component.sh" "$target/Conten
   fi
   exit 1
 fi
+trap - INT TERM HUP
 if [ -n "$backup" ]; then rm -rf "$(dirname "$backup")"; fi
 # 旧名字的版本用同一份设置，装好新版后移除。
 # 系统按标识找图标和通知，同标识的副本只能留一份，否则通知会显示旧图标。

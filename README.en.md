@@ -161,7 +161,7 @@ Where and how Claude can be used is set by **Anthropic's supported regions and t
 
 ### 3. What it can't prevent
 
-- **The few to dozen seconds when the line stays up but the IP silently changes.** Guard checks every 5 seconds.
+- **The few to dozen seconds when the line stays up but the IP silently changes.** Guard checks every 5 seconds. If the IP can't be read at all (poor signal), Claude is cut off after at most 1 minute; a change during that minute goes unnoticed.
 - **IPs written in content.** If a screenshot, page or file shows your IP, Claude can read it. Guard hides IPs by default; don't let Claude open IP-check pages or account sign-in history.
 - **macOS's own traffic**, such as push notifications and certificate checks.
 - **Local proxy ports not set as the system proxy.** A command hard-wired to that port goes out through the proxy.

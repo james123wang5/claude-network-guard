@@ -9,6 +9,9 @@ label=local.appnetworkguard.netd
 target=/Library/PrivilegedHelperTools/AppNetworkGuard
 state=/var/db/appnetworkguard
 plist="/Library/LaunchDaemons/$label.plist"
+stage="$target.new"; previous="$target.old"
+# 上次安装在切换目录的瞬间被打断（只剩旧版备份）：先把旧版放回原处。
+if [ ! -d "$target" ] && [ -d "$previous" ]; then mv "$previous" "$target"; echo "发现上次安装被打断，已先恢复原来的组件"; fi
 for name in guardnetd guardrun guardshell guardrelay guardcheck; do [ -x "$source_dir/$name" ] || { echo "缺少 ${name}"; exit 66; }; done
 
 # 受保护会话进行中不升级，避免替换时出现空档。
@@ -23,7 +26,6 @@ fi
 [ "$gid" -ge 100 ] || { echo "隔离组编号异常"; exit 70; }
 
 # 先把新版完整准备在旁边的目录里。这一步失败时旧组件完全没被动过，照常运行。
-stage="$target.new"; previous="$target.old"
 rm -rf "$stage"
 trap 'rm -rf "$stage"' EXIT
 install -d -o root -g wheel -m 755 "$stage" "$stage/shell" "$state"
