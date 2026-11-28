@@ -9,7 +9,7 @@
 手机漫游、数据线、热点、VPN，你选一条、亲眼看过 IP、点认可。
 线路一断或 IP 一变，Claude 立刻断网，绝不偷偷换到别的网络。
 
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black) ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-only-555) ![iPhone](https://img.shields.io/badge/iPhone-USB%20%2F%20Hotspot-0A84FF) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/version-0.9.0-4F46E5)
+![Tested on macOS 27](https://img.shields.io/badge/实测-macOS_27-black) ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-only-555) ![iPhone](https://img.shields.io/badge/iPhone-USB%20%2F%20Hotspot-0A84FF) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/version-0.9.0-4F46E5)
 
 **简体中文** · [English](README.en.md)
 
@@ -66,7 +66,7 @@
 
 | | 支持 | 说明 |
 |---|---|---|
-| 电脑 | **只支持 Mac**：苹果芯片（M1 及以后），macOS 13 或更新 | **只在 macOS 27 上实测过**。Intel Mac、Windows、Linux 都不支持 |
+| 电脑 | **只支持 Mac**：苹果芯片（M1 及以后） | **在 macOS 27 上实测过。** 其他版本理论上支持（代码最低按 macOS 13 编写），但没有测过，装不上或有问题欢迎提 Issue。Intel Mac、Windows、Linux 都不支持 |
 | 手机 | **iPhone**：能开个人热点就行 | 安卓**没有适配**，识别不了 |
 | Claude | 「应用程序」里的官方 Claude Desktop | 只认 Anthropic 签名的那个 |
 

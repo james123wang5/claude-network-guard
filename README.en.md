@@ -9,7 +9,7 @@
 Phone roaming, USB cable, hotspot or VPN: pick one, look at its IP yourself, approve it.
 If the line drops or the IP changes, Claude goes offline at once. It never quietly switches networks.
 
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black) ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-only-555) ![iPhone](https://img.shields.io/badge/iPhone-USB%20%2F%20Hotspot-0A84FF) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/version-0.9.0-4F46E5)
+![Tested on macOS 27](https://img.shields.io/badge/tested_on-macOS_27-black) ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-only-555) ![iPhone](https://img.shields.io/badge/iPhone-USB%20%2F%20Hotspot-0A84FF) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/version-0.9.0-4F46E5)
 
 [简体中文](README.md) · **English**
 
@@ -66,7 +66,7 @@ The trouble is that a Mac won't stick to the network you meant:
 
 | | Supported | Notes |
 |---|---|---|
-| Computer | **Mac only**: Apple silicon (M1 or later), macOS 13 or later | **Only tested on macOS 27.** No Intel Mac, Windows or Linux |
+| Computer | **Mac only**: Apple silicon (M1 or later) | **Tested on macOS 27.** Other versions should work (the code targets macOS 13 and later) but are untested; if it fails to install or misbehaves, please open an issue. No Intel Mac, Windows or Linux |
 | Phone | **iPhone** with Personal Hotspot | Android is **not supported** |
 | Claude | Official Claude Desktop in Applications | Only the Anthropic-signed app |
 
